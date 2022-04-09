@@ -1,0 +1,10 @@
+BOT_ID={18-digit-bot-id}
+BOT_PRESENCE={your_bot_presence}
+DISCORD_TOKEN={discord_bot_token}
+GUILD_ID={your_guild_id}
+LIVE={attachment://thumbnail.png}
+CHANNEL_IDS={list_of_channel_ids}
+THUMBNAIL={attachment://thumbnail.png}
+THUMBNAIL_FAIL={attachment://thumbnail.png}
+
+# Edit the name of this file to `.env` and change the parameters in the curly brackets as appropriate. Urls to the images can be placed in the `LIVE`, `THUMBNAIL` or `THUMBNAIL_FAIL` fields if the images are not in the local directory.
