@@ -4,5 +4,6 @@
     "next_results": null,
     "next_standings": null,
     "current_results": null,
-    "current_standings": null
+    "current_standings": null,
+    "season": true
 }
