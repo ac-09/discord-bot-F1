@@ -298,7 +298,7 @@ async def create_results_embed(df, ids, idx):
             elif entry['positionText'] == 'W':
                 field += f"**W** . "
             elif len(entry['positionText']) == 1:
-                field += f"**{entry['positionText']}** . ."
+                field += f"**{entry['positionText']}** . . "
             elif entry['positionText'] == '11':
                 field += f"**11** . ."
             else:
