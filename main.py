@@ -21,7 +21,7 @@ intents = discord.Intents.default()
 bot = discord.Bot(intents=intents)
 # bot.intents.scheduled_events = True
 
-with open("DOCS/f1_dict.json", "r") as f:
+with open("res/f1_dict.json", "r") as f:
     f1_dict = json.load(f)
 
 
@@ -55,7 +55,7 @@ async def on_message(message):
 # MAIN FUNCTIONS
 
 async def fetch_calendar(
-    path: str = "DOCS/calendars",
+    path: str = "res/calendars",
     year: int = int(dt.now(datetime.timezone.utc).year),
 ):
 
@@ -212,8 +212,8 @@ async def create_schedule_embed(df, ids, next_session_index):
 
 
 async def create_results_embed(df, ids, idx):
-    if os.path.exists("DOCS/results.json"):
-        with open("DOCS/results.json", "r") as f:
+    if os.path.exists("res/results.json"):
+        with open("res/results.json", "r") as f:
             results = json.load(f)
     else:
         return None
@@ -359,14 +359,14 @@ async def create_results_embed(df, ids, idx):
 
 
 async def create_standings_embed(df, ids):
-    if os.path.exists("DOCS/constructors_standings.json"):
-        with open("DOCS/constructors_standings.json", "r", encoding="utf-8") as f:
+    if os.path.exists("res/constructors_standings.json"):
+        with open("res/constructors_standings.json", "r", encoding="utf-8") as f:
             constructors = json.load(f)
     else:
         return None, None
 
-    if os.path.exists("DOCS/drivers_standings.json"):
-        with open("DOCS/drivers_standings.json", "r", encoding="utf-8") as f:
+    if os.path.exists("res/drivers_standings.json"):
+        with open("res/drivers_standings.json", "r", encoding="utf-8") as f:
             drivers = json.load(f)
     else:
         return None, None
@@ -530,7 +530,7 @@ async def session_adjust(current, df, minutes, message, end=True):
 
         year = df['year'][0]
         df.to_csv(
-            f"DOCS/calendars/{year}/{dt.now(datetime.timezone.utc).strftime(f'{year}_calendar_v%y%m%d.csv')}",
+            f"res/calendars/{year}/{dt.now(datetime.timezone.utc).strftime(f'{year}_calendar_v%y%m%d.csv')}",
             index=False,
         )
 
@@ -585,7 +585,7 @@ async def fetch_results(df, current):
     else:
         return None
 
-    with open("DOCS/results.json", "w", encoding="utf-8") as f:
+    with open("res/results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=4)
     print("Success.")
 
@@ -601,9 +601,9 @@ async def fetch_standings():
         async with session.get("https://ergast.com/api/f1/current/driverstandings.json") as response:
             drivers = json.loads(await response.text())
 
-    with open("DOCS/constructors_standings.json", "w", encoding='utf-8') as f:
+    with open("res/constructors_standings.json", "w", encoding='utf-8') as f:
         json.dump(constructors, f, indent=4)
-    with open("DOCS/drivers_standings.json", "w", encoding='utf-8') as f:
+    with open("res/drivers_standings.json", "w", encoding='utf-8') as f:
         json.dump(drivers, f, indent=4)
     print("Success.")
 

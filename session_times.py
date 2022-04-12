@@ -6,7 +6,7 @@ import pandas as pd
 
 
 def generate_current_calendar(
-	csv_file: str = "DOCS/races.csv",
+	csv_file: str = "res/races.csv",
 	year: int = int(dt.utcnow().year),
 ):
 	column_names = [
@@ -61,8 +61,8 @@ def generate_current_calendar(
 	df["end"] = np.where(df["session"] != "race", df["start"] + 3600, df["start"] + 7200)
 
 	# Write to csv
-	if not os.path.exists(f"DOCS/calendars/{year}"):
-		os.makedirs(f"DOCS/calendars/{year}")
-	df.to_csv(f"DOCS/calendars/{year}/{dt.utcnow().strftime(f'{year}_calendar_v%y%m%d.csv')}", index=False)
+	if not os.path.exists(f"res/calendars/{year}"):
+		os.makedirs(f"res/calendars/{year}")
+	df.to_csv(f"res/calendars/{year}/{dt.utcnow().strftime(f'{year}_calendar_v%y%m%d.csv')}", index=False)
 
 	return
