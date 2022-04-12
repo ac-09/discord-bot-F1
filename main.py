@@ -36,7 +36,7 @@ async def on_message(message):
         msg = message.content.lower().split()
         if len(msg) < 2:
             return
-        current, df = await fetch_data()
+        current, df = await fetch_calendar()
         end = False if "start" in msg else True
         for x in msg:
             minutes = re.match("-?\d{1,3}", x)
@@ -52,49 +52,9 @@ async def on_message(message):
     return
 
 
-async def session_adjust(current, df, minutes, message, end=True):
-    current_session = current.get("current_session")
-    if current_session:
-        idx = df[df["sessionId"] >= int(current_session)]["sessionId"].idxmin()
-        if end:
-            df["end"][idx] += int(minutes * 60)
-            changed = "end"
-        else:
-            df["start"][idx] += int(minutes * 60)
-            changed = "start"
+# MAIN FUNCTIONS
 
-        year = df['year'][0]
-        df.to_csv(
-            f"DOCS/calendars/{year}/{dt.now(datetime.timezone.utc).strftime(f'{year}_calendar_v%y%m%d.csv')}",
-            index=False,
-        )
-
-        await message.author.send(
-            f"{minutes} minutes added to the {changed} time.\nThe scheduled start time is "
-            f"{dt.utcfromtimestamp(df['start'][idx]).strftime('%H:%M:%S')} UTC and the scheduled session end time is "
-            f"{dt.utcfromtimestamp(df['end'][idx]).strftime('%H:%M:%S')} UTC for the "
-            f"{f1_dict['session_names'][df['session'][idx]]} session.")
-    else:
-        return False
-
-
-async def get_current() -> dict:
-    try:
-        f = open("current.json", 'r')
-    except FileNotFoundError:
-        f = open("current.json", "w")
-        current = {}
-    else:
-        try:
-            current = json.load(f)
-        except ValueError:
-            current = {}
-    finally:
-        f.close()
-        return current
-
-
-async def fetch_data(
+async def fetch_calendar(
     path: str = "DOCS/calendars",
     year: int = int(dt.now(datetime.timezone.utc).year),
 ):
@@ -116,53 +76,13 @@ async def fetch_data(
     return current, df
 
 
-async def get_ids(text_channel_ids: list):
-    text_channel = None
-    ids = {
-        'guild': None,
-        'text': None,
-        'voice': None,
-        'color': None,
-    }
-
-    for c in text_channel_ids:
-        try:
-            text_channel = await bot.fetch_channel(int(c))
-            text_channel_ids.remove(c)
-            break
-        except discord.NotFound:
-            text_channel_ids.remove(c)
-
-    if text_channel:
-        ids['text'] = text_channel
-        ids['guild'] = text_channel.guild
-
-    '''voice_channel = await get_channel_id(VOICE_CHANNEL_IDS)
-    if voice_channel:
-        ids['voice'] = voice_channel
-        if not ids['text']:
-            ids['text'] = voice_channel.guild'''
-
-    ids['color'] = await embed_color(ids['guild'])
-    return text_channel_ids, ids
-
-
-async def add_embed_field(embed, row):
-    embed.add_field(
-        name=f"__{f1_dict['session_names'][row['session']]} <t:{row['start']}:R>__",
-        value=f"<t:{row['start']}:F>\n\u200b",
-        inline=False,
-    )
-    return embed
-
-
-async def generate_schedule_embed(current, df, ids):
+async def update_current_params(current, df):
     if df is not None:
         now = int(dt.timestamp(dt.now(datetime.timezone.utc)))
 
         # Find index of next session
         try:
-            i = df[df["end"] > now]["end"].idxmin()
+            next_session_index = df[df["end"] > now]["end"].idxmin()
         except ValueError:
             if current["season"]:
                 current["current_session"] = str(int(current["current_session"]) + 1)
@@ -171,31 +91,76 @@ async def generate_schedule_embed(current, df, ids):
                 current["next_results"] = None
             if current["current_standings"] == current["next_standings"]:
                 current["next_standings"] = None
-            return None, current
+            return current, None, None
 
         # Find race id of next weekend
-        race_id = df["raceId"][i]
+        race_id = df["raceId"][next_session_index]
 
         # Filter future sessions of next weekend
         df = df[df["raceId"] == race_id]
         df = df[df["end"] > now]
 
+        # Write to current dict
+        current["current_session"] = df["sessionId"][next_session_index]
+
+        if df["start"][next_session_index] > now:  # Next session
+            current["current_session"] -= 1
+        current["current_session"] = str(current["current_session"])
+
+        df_future = df[df["session"].isin(["quali", "spr", "race"])]
+
+        # Update next_results and next_standings sessionId
+        if not current.get("current_results") or current["current_results"] == current["next_results"]:
+            current["next_results"] = str(df_future["sessionId"].min())
+
+        if not current.get("current_standings") or current["current_standings"] == current["next_standings"]:
+            current["next_standings"] = str(df_future["sessionId"].max())
+
+        return current, df, next_session_index
+
+    else:
+        return current, None, None
+
+
+async def fetch_data(current, df):
+    idx, update_standings = None, None
+    now = int(dt.timestamp(dt.now(datetime.timezone.utc)))
+
+    current_session = current.get("current_session")
+    current_results = current.get("current_results")
+    next_results = current.get("next_results")
+    current_standings = current.get("current_standings")
+    next_standings = current.get("next_standings")
+
+    if current_session:
+        if next_results:
+            # Rate limit to every 5 minutes
+            if (int(current_session) > int(next_results) or not current_results) and now % 300 < 60:
+                idx = await fetch_results(df, current)
+
+        if next_standings:
+            if (int(current_session) > int(next_standings) or not current_standings) and now % 300 < 60:
+                update_standings = await fetch_standings()
+
+    return idx, update_standings
+
+
+async def create_schedule_embed(df, ids, next_session_index):
+    if df is not None:
+        now = int(dt.timestamp(dt.now(datetime.timezone.utc)))
+
         # Create embed
         em = discord.Embed(
-            title=f"__{df['name'][i]}__",
+            title=f"__{df['name'][next_session_index]}__",
             color=ids['color'],
         )
 
-        # Write to current dict
-        current["current_session"] = df["sessionId"][i]
-
-        if df["start"][i] > now:  # Next session
-            current["current_session"] -= 1
+        if df["start"][next_session_index] > now:  # Next session
             em.set_thumbnail(url=os.getenv('THUMBNAIL'))
             em.add_field(
                 name=f"__Next session__",
-                value=f"{f1_dict['session_names'][df['session'][i]]} "
-                      f"<t:{df['start'][i]}:R>\n<t:{df['start'][i]}:F>\n\u200b",
+                value=f"{f1_dict['session_names'][df['session'][next_session_index]]} "
+                      f"<t:{df['start'][next_session_index]}:R>\n<t:{df['start'][next_session_index]}:F>\n\u200b",
                 inline=False
             )
             await bot.change_presence(activity=None, status=None)
@@ -203,35 +168,27 @@ async def generate_schedule_embed(current, df, ids):
             em.set_thumbnail(url=os.getenv('LIVE'))
             em.add_field(
                 name=f"Current session__",
-                value=f"{f1_dict['session_names'][df['session'][i]]} "
-                      f"<t:{df['start'][i]}:R>\n<t:{df['start'][i]}:F>\n\u200b",
+                value=f"{f1_dict['session_names'][df['session'][next_session_index]]} "
+                      f"<t:{df['start'][next_session_index]}:R>\n<t:{df['start'][next_session_index]}:F>\n\u200b",
                 inline=False
             )
             await bot.change_presence(
                 activity=discord.Activity(
                     type=discord.ActivityType.watching,
-                    name=f"F1: {f1_dict['session_names'][df['session'][i]]}"
+                    name=f"F1: {f1_dict['session_names'][df['session'][next_session_index]]}"
                 ),
                 status=discord.Status.dnd,
             )
-        current["current_session"] = str(current["current_session"])
 
         # Add circuit map
-        url = f1_dict["circuit_maps"].get(str(df["circuitId"][i]))
+        url = f1_dict["circuit_maps"].get(str(df["circuitId"][next_session_index]))
 
         # Filter to upcoming events
         df = df[df["session"].isin(["quali", "spr", "race"])]
 
-        # Update next_results and next_standings sessionId
-        if not current.get("current_results") or current["current_results"] == current["next_results"]:
-            current["next_results"] = str(df["sessionId"].min())
-
-        if not current.get("current_standings") or current["current_standings"] == current["next_standings"]:
-            current["next_standings"] = str(df["sessionId"].max())
-
         # Drop current/next event
         try:
-            df.drop([i], axis=0, inplace=True)
+            df.drop([next_session_index], axis=0, inplace=True)
         except KeyError:
             pass
 
@@ -243,7 +200,7 @@ async def generate_schedule_embed(current, df, ids):
             em.add_field(name="\u200b", value="**__Circuit Map__**")
             em.set_image(url=url)
 
-        return em, current
+        return em
 
     em = discord.Embed(
         title="No F1",
@@ -251,38 +208,15 @@ async def generate_schedule_embed(current, df, ids):
         color=ids['color'],
     )
     em.set_thumbnail(url=os.getenv('THUMBNAIL_FAIL'))
-    return em, current
+    return em
 
 
-async def generate_results(df, ids, current):
-    if current.get("current_results"):
-        idx = df.index[df["sessionId"] == int(current["next_results"])].values[0]
-        link = f"{df['year'][idx]}/{df['round'][idx]}/{f1_dict['api_session']['url'][df['session'][idx]]}"
-        async with aiohttp.ClientSession() as session:
-            print(f"Fetching {f1_dict['session_names'][df['session'][idx]].lower()} results for "
-                  f"{df['name'][idx]}...")
-            async with session.get(f"https://ergast.com/api/f1/{link}.json") as response:
-                results = json.loads(await response.text())
-        if not len(results["MRData"]["RaceTable"]["Races"]):
-            return None, current
-    elif current.get("current_session"):
-        df_filter = df[df["sessionId"] < int(current["current_session"])]
-        idx = df_filter[df_filter["session"].isin(["quali", "spr", "race"])]["sessionId"].idxmax()
-        async with aiohttp.ClientSession() as session:
-            print(f"Fetching {df['name'][idx]} {f1_dict['session_names'][df['session'][idx]]} results...")
-            async with session.get(
-                f"https://ergast.com/api/f1/{df['year'][idx]}/{df['round'][idx]}/"
-                f"{f1_dict['api_session']['url'][df['session'][idx]]}.json"
-            ) as response:
-                results = json.loads(await response.text())
-        if not len(results["MRData"]["RaceTable"]["Races"]):
-            return None, current
+async def create_results_embed(df, ids, idx):
+    if os.path.exists("DOCS/results.json"):
+        with open("DOCS/results.json", "r") as f:
+            results = json.load(f)
     else:
-        return None, current
-
-    print("Success.")
-    with open("DOCS/results.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=4)
+        return None
 
     data = results["MRData"]["RaceTable"]["Races"][0]
     round_name = df['name'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
@@ -419,26 +353,23 @@ async def generate_results(df, ids, current):
                 color=ids['color'],
             )
     else:
-        return None, current
+        return None, None
 
-    current["current_results"] = str(session_id)
-    return embed, current
+    return embed, session_id
 
 
-async def generate_standings(df, ids, current):
-    async with aiohttp.ClientSession() as session:
-        print("Fetching constructors' standings...")
-        async with session.get("https://ergast.com/api/f1/current/constructorstandings.json") as response:
-            constructors = json.loads(await response.text())
-        print("Fetching drivers' standings...")
-        async with session.get("https://ergast.com/api/f1/current/driverstandings.json") as response:
-            drivers = json.loads(await response.text())
-        print("Success.")
+async def create_standings_embed(df, ids):
+    if os.path.exists("DOCS/constructors_standings.json"):
+        with open("DOCS/constructors_standings.json", "r", encoding="utf-8") as f:
+            constructors = json.load(f)
+    else:
+        return None, None
 
-    with open("DOCS/constructors_standings.json", "w", encoding='utf-8') as f:
-        json.dump(constructors, f, indent=4)
-    with open("DOCS/drivers_standings.json", "w", encoding='utf-8') as f:
-        json.dump(drivers, f, indent=4)
+    if os.path.exists("DOCS/drivers_standings.json"):
+        with open("DOCS/drivers_standings.json", "r", encoding="utf-8") as f:
+            drivers = json.load(f)
+    else:
+        return None, None
 
     data = drivers["MRData"]["StandingsTable"]["StandingsLists"][0]
     round_name = df['name'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
@@ -499,31 +430,38 @@ async def generate_standings(df, ids, current):
         value=field
     )
 
-    current["current_standings"] = str(session_id)
-    return embed, current
+    return embed, session_id
 
 
-async def generate_results_embed(current, df, ids):
-    em_results, em_standings = None, None
-    now = int(dt.timestamp(dt.now(datetime.timezone.utc)))
+async def get_ids(text_channel_ids: list):
+    text_channel = None
+    ids = {
+        'guild': None,
+        'text': None,
+        'voice': None,
+        'color': None,
+    }
 
-    current_results = current.get("current_results")
-    current_session = current.get("current_session")
-    current_standings = current.get("current_standings")
-    next_results = current.get("next_results")
-    next_standings = current.get("next_standings")
+    for c in text_channel_ids:
+        try:
+            text_channel = await bot.fetch_channel(int(c))
+            text_channel_ids.remove(c)
+            break
+        except discord.NotFound:
+            text_channel_ids.remove(c)
 
-    if current_session:
-        if next_results:
-            # Rate limit to every 5 minutes; stagger fetch request
-            if (int(current_session) > int(next_results) or not current_results) and now % 300 < 60:
-                em_results, current = await generate_results(df, ids, current)
+    if text_channel:
+        ids['text'] = text_channel
+        ids['guild'] = text_channel.guild
 
-        if next_standings:
-            if (int(current_session) > int(next_standings) or not current_standings) and now % 300 < 60:
-                em_standings, current = await generate_standings(df, ids, current)
+    '''voice_channel = await get_channel_id(VOICE_CHANNEL_IDS)
+    if voice_channel:
+        ids['voice'] = voice_channel
+        if not ids['text']:
+            ids['text'] = voice_channel.guild'''
 
-    return em_results, em_standings, current
+    ids['color'] = await embed_color(ids['guild'])
+    return text_channel_ids, ids
 
 
 async def update_embeds(embeds, ids):
@@ -577,6 +515,101 @@ async def update_embeds(embeds, ids):
         return
 
 
+# AUXILIARY FUNCTIONS
+
+async def session_adjust(current, df, minutes, message, end=True):
+    current_session = current.get("current_session")
+    if current_session:
+        idx = df[df["sessionId"] >= int(current_session)]["sessionId"].idxmin()
+        if end:
+            df["end"][idx] += int(minutes * 60)
+            changed = "end"
+        else:
+            df["start"][idx] += int(minutes * 60)
+            changed = "start"
+
+        year = df['year'][0]
+        df.to_csv(
+            f"DOCS/calendars/{year}/{dt.now(datetime.timezone.utc).strftime(f'{year}_calendar_v%y%m%d.csv')}",
+            index=False,
+        )
+
+        await message.author.send(
+            f"{minutes} minutes added to the {changed} time.\nThe scheduled start time is "
+            f"{dt.utcfromtimestamp(df['start'][idx]).strftime('%H:%M:%S')} UTC and the scheduled session end time is "
+            f"{dt.utcfromtimestamp(df['end'][idx]).strftime('%H:%M:%S')} UTC for the "
+            f"{f1_dict['session_names'][df['session'][idx]]} session.")
+    else:
+        return False
+
+
+async def get_current() -> dict:
+    try:
+        f = open("current.json", 'r')
+    except FileNotFoundError:
+        f = open("current.json", "w")
+        current = {}
+    else:
+        try:
+            current = json.load(f)
+        except ValueError:
+            current = {}
+    finally:
+        f.close()
+        return current
+
+
+async def fetch_results(df, current):
+    if current.get("current_results"):
+        idx = df.index[df["sessionId"] == int(current["next_results"])].values[0]
+        link = f"{df['year'][idx]}/{df['round'][idx]}/{f1_dict['api_session']['url'][df['session'][idx]]}"
+        async with aiohttp.ClientSession() as session:
+            print(f"Fetching {f1_dict['session_names'][df['session'][idx]].lower()} results for "
+                  f"{df['name'][idx]}...")
+            async with session.get(f"https://ergast.com/api/f1/{link}.json") as response:
+                results = json.loads(await response.text())
+        if not len(results["MRData"]["RaceTable"]["Races"]):
+            return None
+    elif current.get("current_session"):
+        df_filter = df[df["sessionId"] < int(current["current_session"])]
+        idx = df_filter[df_filter["session"].isin(["quali", "spr", "race"])]["sessionId"].idxmax()
+        async with aiohttp.ClientSession() as session:
+            print(f"Fetching {df['name'][idx]} {f1_dict['session_names'][df['session'][idx]]} results...")
+            async with session.get(
+                f"https://ergast.com/api/f1/{df['year'][idx]}/{df['round'][idx]}/"
+                f"{f1_dict['api_session']['url'][df['session'][idx]]}.json"
+            ) as response:
+                results = json.loads(await response.text())
+        if not len(results["MRData"]["RaceTable"]["Races"]):
+            return None
+    else:
+        return None
+
+    with open("DOCS/results.json", "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=4)
+    print("Success.")
+
+    return idx
+
+
+async def fetch_standings():
+    async with aiohttp.ClientSession() as session:
+        print("Fetching constructors' standings...")
+        async with session.get("https://ergast.com/api/f1/current/constructorstandings.json") as response:
+            constructors = json.loads(await response.text())
+        print("Fetching drivers' standings...")
+        async with session.get("https://ergast.com/api/f1/current/driverstandings.json") as response:
+            drivers = json.loads(await response.text())
+
+    with open("DOCS/constructors_standings.json", "w", encoding='utf-8') as f:
+        json.dump(constructors, f, indent=4)
+    with open("DOCS/drivers_standings.json", "w", encoding='utf-8') as f:
+        json.dump(drivers, f, indent=4)
+    print("Success.")
+
+    return True
+
+
 async def get_channel_id(channel_ids):
     for c in channel_ids:
         try:
@@ -593,24 +626,46 @@ async def embed_color(guild: discord.Guild):
     return int(hex(s), 0)
 
 
+async def add_embed_field(embed, row):
+    embed.add_field(
+        name=f"__{f1_dict['session_names'][row['session']]} <t:{row['start']}:R>__",
+        value=f"<t:{row['start']}:F>\n\u200b",
+        inline=False,
+    )
+    return embed
+
+
 @tasks.loop(minutes=1)
 async def update():
     if update.current_loop != 0:
-        current, df = await fetch_data()
+        current, df = await fetch_calendar()
+        current, df_next, next_session_index = await update_current_params(current, df)
+        idx, update_standings = await fetch_data(current, df)
 
         text_channel_ids = [int(x.strip()) for x in
                             os.getenv('TEXT_CHANNEL_IDS').replace('[', '').replace(']', '').split(',')]
         while len(text_channel_ids):
             text_channel_ids, ids = await get_ids(text_channel_ids)
 
-            em_schedule, current = await generate_schedule_embed(current, df, ids)
-            em_results, em_standings, current = await generate_results_embed(current, df, ids)
+            em_standings, standings_session_id = None, None
+            if update_standings:
+                em_standings, standings_session_id = await create_standings_embed(df, ids)
+
+            em_results, results_session_id = None, None
+            if idx:
+                em_results, results_session_id = await create_results_embed(df, ids, idx)
+
+            em_schedule = await create_schedule_embed(df_next, ids, next_session_index)
             embeds = [em_standings, em_results, em_schedule]
             await update_embeds(embeds, ids)
 
-            with open("current.json", "w", encoding="utf-8") as f:
-                json.dump(current, f, indent=4)
-            # await update_events(upcoming_events, ids)
+        if results_session_id:
+            current["current_results"] = str(results_session_id)
+        if standings_session_id:
+            current["current_standings"] = str(standings_session_id)
+
+        with open("current.json", "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=4)
 
 
 if __name__ == '__main__':
