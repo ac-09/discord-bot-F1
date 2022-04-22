@@ -187,7 +187,7 @@ async def create_schedule_embed(df, ids, next_session_index):
 
         # Drop current/next event
         try:
-            df.drop([next_session_index], axis=0, inplace=True)
+            df = df.drop([next_session_index], axis=0)
         except KeyError:
             pass
 
