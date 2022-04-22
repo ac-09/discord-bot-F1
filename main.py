@@ -219,12 +219,11 @@ async def create_results_embed(df, ids, idx):
 
     data = results["MRData"]["RaceTable"]["Races"][0]
     round_name = df['name'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
-    session_id = df['sessionId'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
 
     if df['session'][idx] == "quali":
         data = data["QualifyingResults"]
 
-        field = "**#** . . **Driver** . . . . . . . . . . . . . . . . .**Team** . . " \
+        field = "**#** . . **Driver** . . . . . . . . . . . . . . . .**Team** . . . " \
                 "**Q1** . . . . . . . . **Q2** . . . .  . . . . **Q3** . . . . . . \n"
         for i, entry in enumerate(data):
             try:
@@ -245,6 +244,8 @@ async def create_results_embed(df, ids, idx):
                 field += f"**{entry['position']}** . . "
             elif entry['position'] == '11':
                 field += f"**{entry['position']}** . ."
+            elif entry['position'] == '20':
+                field += f"**20** ."
             else:
                 field += f"**{entry['position']}** . "
             field += f"_**{entry['Driver']['familyName'].upper()}**, {entry['Driver']['givenName']}_ {padding}" \
@@ -277,7 +278,7 @@ async def create_results_embed(df, ids, idx):
         else:
             data = results["MRData"]["RaceTable"]["Races"][0]["SprintResults"]
 
-        field = "**#** . . **Driver** . . . . . . . . . . . . . . . . **Team** . . . . . **Points** . . " \
+        field = "**#** . . **Driver** . . . . . . . . . . . . . . . **Team** . . . . . . **Points** . . " \
                 "**Time** . . . . . . . . \n"
         fastest_lap = None
         for i, entry in enumerate(data):
@@ -300,6 +301,8 @@ async def create_results_embed(df, ids, idx):
                 field += f"**{entry['positionText']}** . . "
             elif entry['positionText'] == '11':
                 field += f"**11** . ."
+            elif entry['positionText'] == '20':
+                field += f"**20** ."
             else:
                 field += f"**{entry['positionText']}** . "
 
@@ -352,9 +355,9 @@ async def create_results_embed(df, ids, idx):
                 color=ids['color'],
             )
     else:
-        return None, None
+        return None
 
-    return embed, session_id
+    return embed
 
 
 async def create_standings_embed(df, ids):
@@ -362,17 +365,16 @@ async def create_standings_embed(df, ids):
         with open("res/constructors_standings.json", "r", encoding="utf-8") as f:
             constructors = json.load(f)
     else:
-        return None, None
+        return None
 
     if os.path.exists("res/drivers_standings.json"):
         with open("res/drivers_standings.json", "r", encoding="utf-8") as f:
             drivers = json.load(f)
     else:
-        return None, None
+        return None
 
     data = drivers["MRData"]["StandingsTable"]["StandingsLists"][0]
     round_name = df['name'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
-    session_id = df['sessionId'][df[df['round'] == int(data["round"])]['sessionId'].idxmax()]
 
     # Drivers
     embed = discord.Embed(
@@ -429,7 +431,7 @@ async def create_standings_embed(df, ids):
         value=field
     )
 
-    return embed, session_id
+    return embed
 
 
 async def get_ids(text_channel_ids: list):
@@ -646,22 +648,22 @@ async def update():
         while len(text_channel_ids):
             text_channel_ids, ids = await get_ids(text_channel_ids)
 
-            em_standings, standings_session_id = None, None
+            em_standings = None
             if update_standings:
-                em_standings, standings_session_id = await create_standings_embed(df, ids)
+                em_standings = await create_standings_embed(df, ids)
 
-            em_results, results_session_id = None, None
+            em_results = None
             if idx:
-                em_results, results_session_id = await create_results_embed(df, ids, idx)
+                em_results = await create_results_embed(df, ids, idx)
 
             em_schedule = await create_schedule_embed(df_next, ids, next_session_index)
             embeds = [em_standings, em_results, em_schedule]
             await update_embeds(embeds, ids)
 
-        if results_session_id:
-            current["current_results"] = str(results_session_id)
-        if standings_session_id:
-            current["current_standings"] = str(standings_session_id)
+        if em_results:
+            current["current_results"] = current["next_results"]
+        if em_standings:
+            current["current_standings"] = current["next_standings"]
 
         with open("current.json", "w", encoding="utf-8") as f:
             json.dump(current, f, indent=4)
