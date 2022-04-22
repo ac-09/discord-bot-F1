@@ -168,8 +168,7 @@ async def create_schedule_embed(df, ids, next_session_index):
             em.set_thumbnail(url=os.getenv('LIVE'))
             em.add_field(
                 name=f"__Current session__",
-                value=f"{f1_dict['session_names'][df['session'][next_session_index]]} "
-                      f"<t:{df['start'][next_session_index]}:R>\n<t:{df['start'][next_session_index]}:F>\n\u200b",
+                value=f"{f1_dict['session_names'][df['session'][next_session_index]]}",
                 inline=False
             )
             await bot.change_presence(
