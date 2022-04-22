@@ -387,11 +387,13 @@ async def create_standings_embed(df, ids):
         padding = f1_dict['embed_padding'][entry['Driver']['code']]
 
         if entry['positionText'] == '1':
-            field += f"**{entry['positionText']}** . . ."
+            field += f"**1** . . ."
         elif len(entry['positionText']) == 1:
             field += f"**{entry['positionText']}** . . "
         elif entry['positionText'] == '11':
-            field += f"**{entry['positionText']}** . ."
+            field += f"**11** . ."
+        elif entry['positionText'] == '20':
+            field += f"**20** ."
         else:
             field += f"**{entry['positionText']}** . "
 
@@ -418,7 +420,7 @@ async def create_standings_embed(df, ids):
             padding = ". " * (19 - len(f"{[entry['Constructor']['constructorId']]}"))
 
         if entry['positionText'] == '1':
-            field += f"**{entry['positionText']}** . . ."
+            field += f"**1** . . ."
         elif len(entry['positionText']) == 1:
             field += f"**{entry['positionText']}** . . "
         else:
