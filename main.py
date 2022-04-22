@@ -167,7 +167,7 @@ async def create_schedule_embed(df, ids, next_session_index):
         else:  # Current session
             em.set_thumbnail(url=os.getenv('LIVE'))
             em.add_field(
-                name=f"Current session__",
+                name=f"__Current session__",
                 value=f"{f1_dict['session_names'][df['session'][next_session_index]]} "
                       f"<t:{df['start'][next_session_index]}:R>\n<t:{df['start'][next_session_index]}:F>\n\u200b",
                 inline=False
