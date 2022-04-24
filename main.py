@@ -140,7 +140,7 @@ async def fetch_data(current, df):
 
         if next_standings:
             if (int(current_session) > int(next_standings) or not current_standings) and now % 300 < 60:
-                update_standings = await fetch_standings()
+                update_standings = await fetch_standings(df, current)
 
     return idx, update_standings
 
@@ -595,22 +595,35 @@ async def fetch_results(df, current):
     return idx
 
 
-async def fetch_standings():
-    async with aiohttp.ClientSession() as session:
-        print("Fetching constructors' standings...")
-        async with session.get("https://ergast.com/api/f1/current/constructorstandings.json") as response:
-            constructors = json.loads(await response.text())
-        print("Fetching drivers' standings...")
-        async with session.get("https://ergast.com/api/f1/current/driverstandings.json") as response:
-            drivers = json.loads(await response.text())
+async def fetch_standings(df, current):
+    if current.get("next_standings"):
+        round_no = df[df["sessionId"] == int(current["next_standings"])]["round"].values[0]
+        async with aiohttp.ClientSession() as session:
+            print("Fetching constructors' standings...")
+            async with session.get(
+                f"https://ergast.com/api/f1/current/{round_no}/constructorstandings.json"
+            ) as response:
+                constructors = json.loads(await response.text())
+            if not len(constructors["MRData"]["StandingsTable"]["StandingsLists"]):
+                return None
 
-    with open("res/constructors_standings.json", "w", encoding='utf-8') as f:
-        json.dump(constructors, f, indent=4)
-    with open("res/drivers_standings.json", "w", encoding='utf-8') as f:
-        json.dump(drivers, f, indent=4)
-    print("Success.")
+            print("Fetching drivers' standings...")
+            async with session.get(
+                f"https://ergast.com/api/f1/current/{round_no}/driverstandings.json"
+            ) as response:
+                drivers = json.loads(await response.text())
+            if not len(drivers["MRData"]["StandingsTable"]["StandingsLists"]):
+                return None
 
-    return True
+        with open("res/constructors_standings.json", "w", encoding='utf-8') as f:
+            json.dump(constructors, f, indent=4)
+        with open("res/drivers_standings.json", "w", encoding='utf-8') as f:
+            json.dump(drivers, f, indent=4)
+        print("Success.")
+
+        return True
+    else:
+        return None
 
 
 async def get_channel_id(channel_ids):
